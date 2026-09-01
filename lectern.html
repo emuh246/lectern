@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lectern — listen to your books</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#1b1611;
+    --bg-panel:#221c15;
+    --bg-panel-2:#2a2219;
+    --ink:#efe4d2;
+    --ink-dim:#a9967c;
+    --ink-faint:#78684f;
+    --accent:#c9903f;
+    --accent-soft:rgba(201,144,63,.16);
+    --accent-soft-2:rgba(201,144,63,.3);
+    --line:#3a2f22;
+    --danger:#b8593f;
+    --serif:'Source Serif 4', Georgia, serif;
+    --sans:'Inter', system-ui, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(201,144,63,.07), transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--accent-soft-2);}
+  button{font-family:var(--sans);cursor:pointer;}
+  button:focus-visible, input:focus-visible, select:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+
+  .app{
+    display:grid;
+    grid-template-columns:280px 1fr;
+    height:100vh;
+  }
+  @media (max-width:820px){
+    .app{grid-template-columns:1fr;}
+    .shelf{display:none;}
+    .shelf.open{display:flex; position:fixed; inset:0; z-index:40; width:auto;}
+  }
+
+  /* ---------- Shelf (sidebar) ---------- */
+  .shelf{
+    background:var(--bg-panel);
+    border-right:1px solid var(--line);
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+  }
+  .shelf-head{
+    padding:22px 20px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand{
+    font-family:var(--serif);
+    font-size:21px;
+    font-weight:600;
+    letter-spacing:.2px;
+    display:flex; align-items:baseline; gap:8px;
+  }
+  .brand small{font-family:var(--sans); font-size:11px; color:var(--ink-faint); font-weight:500;}
+  .add-btn{
+    margin-top:14px;
+    width:100%;
+    padding:10px 12px;
+    border-radius:8px;
+    border:1px solid var(--accent-soft-2);
+    background:var(--accent-soft);
+    color:var(--accent);
+    font-size:13px;
+    font-weight:600;
+    display:flex; align-items:center; justify-content:center; gap:7px;
+  }
+  .add-btn:hover{background:var(--accent-soft-2);}
+
+  .shelf-list{
+    flex:1;
+    overflow-y:auto;
+    padding:10px 10px 16px;
+  }
+  .empty-shelf{
+    color:var(--ink-faint);
+    font-size:13px;
+    padding:24px 14px;
+    line-height:1.6;
+  }
+  .book-row{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    padding:10px 10px;
+    border-radius:8px;
+    cursor:pointer;
+    margin-bottom:2px;
+    border:1px solid transparent;
+  }
+  .book-row:hover{background:var(--bg-panel-2);}
+  .book-row.active{background:var(--accent-soft); border-color:var(--accent-soft-2);}
+  .spine{
+    width:6px; height:38px; border-radius:3px; flex-shrink:0; margin-top:2px;
+  }
+  .book-meta{min-width:0;}
+  .book-title{
+    font-size:13.5px; font-weight:600; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .book-sub{
+    font-size:11.5px; color:var(--ink-faint); margin-top:2px;
+    display:flex; gap:6px; align-items:center;
+  }
+  .fmt-tag{
+    text-transform:uppercase; font-size:9.5px; letter-spacing:.4px;
+    color:var(--ink-dim); background:var(--bg-panel-2); border:1px solid var(--line);
+    padding:1px 5px; border-radius:4px;
+  }
+
+  .shelf-foot{
+    padding:12px 18px 16px; border-top:1px solid var(--line);
+    font-size:11px; color:var(--ink-faint); line-height:1.5;
+  }
+
+  input[type=file]{display:none;}
+
+  /* ---------- Reading pane ---------- */
+  .reader{
+    display:flex; flex-direction:column; min-width:0; min-height:0;
+  }
+  .reader-top{
+    padding:16px 24px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px;
+  }
+  .menu-btn{
+    display:none;
+    background:none; border:1px solid var(--line); color:var(--ink-dim);
+    width:34px; height:34px; border-radius:8px; font-size:16px;
+  }
+  @media (max-width:820px){ .menu-btn{display:block;} }
+
+  .now-reading{min-width:0; flex:1;}
+  .now-reading .t{font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .now-reading .c{font-size:12px; color:var(--ink-faint); margin-top:1px;}
+
+  .chapter-nav{display:flex; align-items:center; gap:6px;}
+  .icon-btn{
+    background:none; border:1px solid var(--line); color:var(--ink-dim);
+    width:32px; height:32px; border-radius:7px; display:flex; align-items:center; justify-content:center;
+    font-size:14px;
+  }
+  .icon-btn:hover{border-color:var(--accent-soft-2); color:var(--ink);}
+  .icon-btn:disabled{opacity:.35; cursor:default;}
+
+  .page{
+    flex:1; overflow-y:auto; padding:48px 24px 140px;
+  }
+  .page-inner{
+    max-width:640px; margin:0 auto;
+    font-family:var(--serif);
+    font-size:19px;
+    line-height:1.85;
+    color:var(--ink);
+  }
+  .page-inner p{margin:0 0 1.15em;}
+  .page-inner .s{
+    transition:background .15s ease, color .15s ease;
+    border-radius:3px;
+    padding:0 1px;
+  }
+  .page-inner .s.active{
+    background:var(--accent-soft-2);
+    color:#fff6e6;
+  }
+  .page-inner .s.done{color:var(--ink-dim);}
+
+  .welcome{
+    max-width:520px; margin:8vh auto; text-align:center; color:var(--ink-dim);
+  }
+  .welcome h1{
+    font-family:var(--serif); color:var(--ink); font-weight:600; font-size:28px; margin:0 0 10px;
+  }
+  .welcome p{font-size:14.5px; line-height:1.7; margin:0 auto 22px; max-width:420px;}
+  .welcome .fmt-row{display:flex; gap:8px; justify-content:center; margin-bottom:26px; flex-wrap:wrap;}
+  .welcome .fmt-row span{
+    font-size:11px; letter-spacing:.3px; text-transform:uppercase; color:var(--ink-faint);
+    border:1px solid var(--line); padding:4px 10px; border-radius:20px;
+  }
+  .welcome .add-btn{width:auto; padding:12px 22px; font-size:13.5px;}
+
+  .drop-active .page{background:var(--accent-soft);}
+
+  /* ---------- Playback bar ---------- */
+  .bar{
+    position:sticky; bottom:0;
+    border-top:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(34,28,21,.4), var(--bg-panel) 30%);
+    backdrop-filter:blur(6px);
+    padding:14px 22px 16px;
+  }
+  .bar-inner{max-width:760px; margin:0 auto;}
+  .progress-row{display:flex; align-items:center; gap:10px; margin-bottom:12px;}
+  .progress-time{font-size:11px; color:var(--ink-faint); font-variant-numeric:tabular-nums; width:34px;}
+  .progress-time.r{text-align:right;}
+  .progress-track{
+    flex:1; height:4px; background:var(--line); border-radius:2px; position:relative; cursor:pointer;
+  }
+  .progress-fill{
+    position:absolute; left:0; top:0; bottom:0; background:var(--accent); border-radius:2px;
+  }
+  .progress-track:hover .progress-fill{background:#dba75a;}
+
+  .controls-row{display:flex; align-items:center; justify-content:center; gap:6px; position:relative;}
+  .transport{display:flex; align-items:center; gap:10px;}
+  .transport button{
+    background:none; border:none; color:var(--ink-dim);
+    width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  }
+  .transport button:hover{color:var(--ink); background:var(--bg-panel-2);}
+  .transport .play{
+    width:52px; height:52px; background:var(--accent); color:#241a0d;
+  }
+  .transport .play:hover{background:#dba75a;}
+  .transport button:disabled{opacity:.3; cursor:default;}
+  .transport button:disabled:hover{background:none; color:var(--ink-dim);}
+
+  .side-controls{
+    position:absolute; right:0; top:50%; transform:translateY(-50%);
+    display:flex; align-items:center; gap:8px;
+  }
+  .rate-select, .voice-select{
+    background:var(--bg-panel-2); color:var(--ink-dim); border:1px solid var(--line);
+    border-radius:7px; font-size:12px; padding:6px 8px; max-width:130px;
+  }
+  @media (max-width:700px){ .side-controls{display:none;} }
+
+  .no-voice-note{
+    text-align:center; font-size:11.5px; color:var(--ink-faint); margin-top:10px;
+  }
+
+  .spinner{
+    width:14px; height:14px; border-radius:50%;
+    border:2px solid var(--accent-soft-2); border-top-color:var(--accent);
+    animation:spin .7s linear infinite; display:inline-block;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .toast{
+    position:fixed; bottom:110px; left:50%; transform:translateX(-50%);
+    background:#2a2219; border:1px solid var(--line); color:var(--ink);
+    padding:10px 16px; border-radius:8px; font-size:13px; z-index:60;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <aside class="shelf" id="shelf">
+    <div class="shelf-head">
+      <div class="brand">Lectern <small>audiobook mode</small></div>
+      <button class="add-btn" id="addBtn">+ &nbsp;Add a book</button>
+      <input type="file" id="fileInput" accept=".epub,.docx,.pdf,.txt,.md" multiple>
+    </div>
+    <div class="shelf-list" id="shelfList">
+      <div class="empty-shelf">No books yet. Add an EPUB, Word doc, PDF, or text file to begin.</div>
+    </div>
+    <div class="shelf-foot">Files stay in this browser tab. Nothing is uploaded anywhere.</div>
+  </aside>
+
+  <main class="reader">
+    <div class="reader-top" id="readerTop" style="display:none;">
+      <button class="menu-btn" id="menuBtn">☰</button>
+      <div class="now-reading">
+        <div class="t" id="nowTitle">—</div>
+        <div class="c" id="nowChapter">—</div>
+      </div>
+      <div class="chapter-nav">
+        <button class="icon-btn" id="prevChapBtn" title="Previous chapter">⏮</button>
+        <button class="icon-btn" id="nextChapBtn" title="Next chapter">⏭</button>
+      </div>
+    </div>
+
+    <div class="page" id="page">
+      <div class="welcome" id="welcome">
+        <h1>Let your books listen back</h1>
+        <p>Drop in an EPUB, Word document, PDF, or plain text file and Lectern reads it aloud, chapter by chapter, at whatever pace suits you.</p>
+        <div class="fmt-row"><span>EPUB</span><span>DOCX</span><span>PDF</span><span>TXT / MD</span></div>
+        <button class="add-btn" id="addBtn2">+ &nbsp;Add a book</button>
+      </div>
+      <div class="page-inner" id="pageInner" style="display:none;"></div>
+    </div>
+
+    <div class="bar" id="bar" style="display:none;">
+      <div class="bar-inner">
+        <div class="progress-row">
+          <div class="progress-time" id="posLabel">0%</div>
+          <div class="progress-track" id="progressTrack">
+            <div class="progress-fill" id="progressFill" style="width:0%;"></div>
+          </div>
+          <div class="progress-time r" id="chapLabel">—</div>
+        </div>
+        <div class="controls-row">
+          <div class="transport">
+            <button id="backBtn" title="Back one sentence">⟲</button>
+            <button class="play" id="playBtn" title="Play">▶</button>
+            <button id="fwdBtn" title="Forward one sentence">⟳</button>
+          </div>
+          <div class="side-controls">
+            <select class="voice-select" id="voiceSelect"></select>
+            <select class="rate-select" id="rateSelect">
+              <option value="0.75">0.75×</option>
+              <option value="1" selected>1×</option>
+              <option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option>
+              <option value="1.75">1.75×</option>
+              <option value="2">2×</option>
+            </select>
+          </div>
+        </div>
+        <div class="no-voice-note" id="voiceNote" style="display:none;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<audio id="ttsAudio" style="display:none;"></audio>
+
+<script>
+(function(){
+  "use strict";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  // ---------------- state ----------------
+  const state = {
+    books: [],          // {id, title, author, format, chapters:[{title, paragraphs:[[sentences]]}]}
+    activeBookId: null,
+    activeChapter: 0,
+    sentences: [],       // flat list of sentence <span> elements for the current chapter
+    sentenceIndex: 0,
+    playing: false,
+    loadedIdx: null,     // index whose audio is currently loaded into ttsAudio
+    rate: 1,
+    kokoroVoice: "af_heart",
+    engine: "kokoro",    // "kokoro" | "browser" (browser is the robotic fallback)
+    kokoro: null,
+    kokoroLoadPromise: null,
+    cacheMap: new Map(), // key -> object URL
+    cacheOrder: [],
+    pendingGen: new Map(),// key -> Promise<url>
+    browserVoice: null,
+  };
+
+  const KOKORO_MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
+  const KOKORO_CDN = "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js";
+  const KOKORO_VOICES = [
+    {id:"af_heart",   label:"Heart — US female"},
+    {id:"af_bella",   label:"Bella — US female"},
+    {id:"af_nicole",  label:"Nicole — US female"},
+    {id:"am_michael", label:"Michael — US male"},
+    {id:"am_fenrir",  label:"Fenrir — US male"},
+    {id:"bf_emma",    label:"Emma — UK female"},
+    {id:"bm_george",  label:"George — UK male"},
+    {id:"bm_fable",   label:"Fable — UK male"},
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const shelfList = $("shelfList"), page = $("page"), pageInner = $("pageInner"),
+        welcome = $("welcome"), bar = $("bar"), readerTop = $("readerTop"),
+        nowTitle = $("nowTitle"), nowChapter = $("nowChapter"),
+        playBtn = $("playBtn"), progressFill = $("progressFill"), progressTrack = $("progressTrack"),
+        posLabel = $("posLabel"), chapLabel = $("chapLabel"),
+        voiceSelect = $("voiceSelect"), rateSelect = $("rateSelect"), voiceNote = $("voiceNote"),
+        shelf = $("shelf"), menuBtn = $("menuBtn"), ttsAudio = $("ttsAudio");
+
+  function toast(msg){
+    const t = document.createElement("div");
+    t.className = "toast"; t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=>t.remove(), 3200);
+  }
+
+  // ---------------- text helpers ----------------
+  function splitSentences(text){
+    text = text.replace(/\s+/g, " ").trim();
+    if(!text) return [];
+    const parts = text.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g);
+    if(!parts) return [text];
+    return parts.map(s => s.trim()).filter(Boolean);
+  }
+
+  function htmlToParagraphs(container){
+    const paras = [];
+    const blocks = container.querySelectorAll("p, h1, h2, h3, h4, li, blockquote, div");
+    let seen = false;
+    blocks.forEach(b => {
+      if(b.children.length && b.querySelector("p,h1,h2,h3,h4,li,blockquote")) return; // skip wrapper containers
+      const t = b.textContent.replace(/\s+/g," ").trim();
+      if(t.length > 1){ paras.push(t); seen = true; }
+    });
+    if(!seen){
+      const t = container.textContent.replace(/\s+/g," ").trim();
+      if(t) paras.push(t);
+    }
+    return paras;
+  }
+
+  function paragraphsToChapter(title, paragraphs){
+    return {
+      title: title || "Untitled",
+      paragraphs: paragraphs.filter(p=>p && p.trim()).map(p => splitSentences(p))
+    };
+  }
+
+  function chunkPlainText(text){
+    return text.split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean);
+  }
+
+  // ---------------- parsers ----------------
+  async function parseEpub(file){
+    const zip = await JSZip.loadAsync(file);
+    const containerXml = await zip.file("META-INF/container.xml").async("string");
+    const containerDoc = new DOMParser().parseFromString(containerXml, "application/xml");
+    const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
+    const opfDir = opfPath.includes("/") ? opfPath.slice(0, opfPath.lastIndexOf("/")+1) : "";
+    const opfXml = await zip.file(opfPath).async("string");
+    const opfDoc = new DOMParser().parseFromString(opfXml, "application/xml");
+
+    const title = opfDoc.querySelector("metadata > title")?.textContent?.trim() || file.name.replace(/\.epub$/i,"");
+    const author = opfDoc.querySelector("metadata > creator")?.textContent?.trim() || "";
+
+    const manifest = {};
+    opfDoc.querySelectorAll("manifest > item").forEach(item=>{
+      manifest[item.getAttribute("id")] = item.getAttribute("href");
+    });
+    const spineIds = [...opfDoc.querySelectorAll("spine > itemref")].map(i=>i.getAttribute("idref"));
+
+    const chapters = [];
+    for(const id of spineIds){
+      const href = manifest[id];
+      if(!href) continue;
+      const fullPath = (opfDir + href).replace(/\\/g,"/");
+      const entry = zip.file(fullPath) || zip.file(decodeURIComponent(fullPath));
+      if(!entry) continue;
+      const html = await entry.async("string");
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      let chTitle = doc.querySelector("h1,h2,title")?.textContent?.trim();
+      const paras = htmlToParagraphs(doc.body || doc);
+      if(paras.length === 0) continue;
+      if(!chTitle) chTitle = "Chapter " + (chapters.length+1);
+      chapters.push(paragraphsToChapter(chTitle, paras));
+    }
+    return { title, author, format:"EPUB", chapters };
+  }
+
+  async function parseDocx(file){
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.convertToHtml({ arrayBuffer });
+    const doc = new DOMParser().parseFromString(result.value, "text/html");
+    const paras = htmlToParagraphs(doc.body);
+    const title = file.name.replace(/\.docx$/i,"");
+    return { title, author:"", format:"DOCX", chapters:[ paragraphsToChapter(title, paras) ] };
+  }
+
+  async function parsePdf(file){
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    let paras = [];
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      let line = "", pageParas = [];
+      let lastY = null;
+      content.items.forEach(item=>{
+        if(lastY !== null && Math.abs(item.transform[5]-lastY) > 12 && line.trim()){
+          pageParas.push(line.trim()); line = "";
+        }
+        line += item.str + (item.hasEOL ? " " : " ");
+        lastY = item.transform[5];
+      });
+      if(line.trim()) pageParas.push(line.trim());
+      paras = paras.concat(pageParas);
+    }
+    // merge short fragment lines into flowing paragraphs
+    const merged = [];
+    let buf = "";
+    paras.forEach(p=>{
+      buf += (buf ? " " : "") + p;
+      if(buf.length > 220 || /[.!?]$/.test(p)){ merged.push(buf); buf=""; }
+    });
+    if(buf) merged.push(buf);
+    const title = file.name.replace(/\.pdf$/i,"");
+    return { title, author:"", format:"PDF", chapters:[ paragraphsToChapter(title, merged) ] };
+  }
+
+  async function parseText(file){
+    const text = await file.text();
+    const title = file.name.replace(/\.(txt|md)$/i,"");
+    return { title, author:"", format:"TXT", chapters:[ paragraphsToChapter(title, chunkPlainText(text)) ] };
+  }
+
+  async function parseFile(file){
+    const ext = file.name.split(".").pop().toLowerCase();
+    if(ext === "epub") return parseEpub(file);
+    if(ext === "docx") return parseDocx(file);
+    if(ext === "pdf") return parsePdf(file);
+    if(ext === "txt" || ext === "md") return parseText(file);
+    throw new Error("Unsupported file type: ." + ext);
+  }
+
+  // ---------------- shelf UI ----------------
+  const spineColors = ["#c9903f","#7f9c8e","#a9647b","#6f87b0","#b0975f","#8a7ab0"];
+
+  function renderShelf(){
+    shelfList.innerHTML = "";
+    if(state.books.length === 0){
+      shelfList.innerHTML = '<div class="empty-shelf">No books yet. Add an EPUB, Word doc, PDF, or text file to begin.</div>';
+      return;
+    }
+    state.books.forEach((b, i)=>{
+      const row = document.createElement("div");
+      row.className = "book-row" + (b.id === state.activeBookId ? " active" : "");
+      row.innerHTML = `
+        <div class="spine" style="background:${spineColors[i % spineColors.length]}"></div>
+        <div class="book-meta">
+          <div class="book-title">${escapeHtml(b.title)}</div>
+          <div class="book-sub"><span class="fmt-tag">${b.format}</span><span>${b.chapters.length} ${b.chapters.length===1?"chapter":"chapters"}</span></div>
+        </div>`;
+      row.addEventListener("click", ()=>openBook(b.id));
+      shelfList.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s){
+    const d = document.createElement("div"); d.textContent = s; return d.innerHTML;
+  }
+
+  // ---------------- reading / playback ----------------
+  function openBook(id, chapter){
+    stopSpeech();
+    if(id !== state.activeBookId) clearAudioCache();
+    state.activeBookId = id;
+    state.activeChapter = chapter || 0;
+    renderShelf();
+    renderChapter();
+    welcome.style.display = "none";
+    pageInner.style.display = "block";
+    readerTop.style.display = "flex";
+    bar.style.display = "block";
+    shelf.classList.remove("open");
+  }
+
+  function getActiveBook(){
+    return state.books.find(b=>b.id === state.activeBookId);
+  }
+
+  function renderChapter(){
+    const book = getActiveBook();
+    if(!book) return;
+    const chapter = book.chapters[state.activeChapter];
+    nowTitle.textContent = book.title;
+    nowChapter.textContent = chapter.title + `  ·  ${state.activeChapter+1}/${book.chapters.length}`;
+    chapLabel.textContent = `${state.activeChapter+1}/${book.chapters.length}`;
+
+    pageInner.innerHTML = "";
+    state.sentences = [];
+    chapter.paragraphs.forEach((sentArr, pIdx)=>{
+      const p = document.createElement("p");
+      sentArr.forEach(sText=>{
+        const span = document.createElement("span");
+        span.className = "s";
+        span.textContent = sText + " ";
+        span.addEventListener("click", ()=>{
+          const idx = state.sentences.indexOf(span);
+          if(idx >= 0) jumpTo(idx);
+        });
+        p.appendChild(span);
+        state.sentences.push(span);
+      });
+      pageInner.appendChild(p);
+    });
+
+    state.sentenceIndex = 0;
+    state.loadedIdx = null;
+    ttsAudio.pause();
+    updateProgress();
+    updateChapterNavButtons();
+    page.scrollTop = 0;
+  }
+
+  function updateChapterNavButtons(){
+    const book = getActiveBook();
+    $("prevChapBtn").disabled = state.activeChapter <= 0;
+    $("nextChapBtn").disabled = state.activeChapter >= book.chapters.length-1;
+  }
+
+  function updateProgress(){
+    const total = state.sentences.length || 1;
+    const pct = Math.round((state.sentenceIndex/total)*100);
+    progressFill.style.width = pct + "%";
+    posLabel.textContent = pct + "%";
+  }
+
+  function clearHighlights(){
+    state.sentences.forEach(el=>el.classList.remove("active"));
+  }
+
+  function highlight(idx){
+    clearHighlights();
+    state.sentences.forEach((el,i)=>{ el.classList.toggle("done", i < idx); });
+    const el = state.sentences[idx];
+    if(el){
+      el.classList.add("active");
+      el.scrollIntoView({block:"center", behavior:"smooth"});
+    }
+  }
+
+  // ---------------- speech engine: Kokoro (natural, local neural TTS) ----------------
+  // Falls back to the browser's built-in speechSynthesis only if Kokoro can't load.
+
+  function setEngineStatus(msg, show){
+    voiceNote.textContent = msg || "";
+    voiceNote.style.display = show === false ? "none" : (msg ? "block" : "none");
+  }
+
+  function cacheKey(idx){ return state.activeBookId + "#" + state.activeChapter + "#" + idx + "#" + state.kokoroVoice; }
+
+  function cacheSet(key, url){
+    if(state.cacheMap.has(key)) return;
+    state.cacheMap.set(key, url);
+    state.cacheOrder.push(key);
+    if(state.cacheOrder.length > 40){
+      const oldKey = state.cacheOrder.shift();
+      const oldUrl = state.cacheMap.get(oldKey);
+      if(oldUrl) URL.revokeObjectURL(oldUrl);
+      state.cacheMap.delete(oldKey);
+    }
+  }
+
+  function clearAudioCache(){
+    state.cacheMap.forEach(url => URL.revokeObjectURL(url));
+    state.cacheMap.clear();
+    state.cacheOrder = [];
+    state.pendingGen.clear();
+  }
+
+  async function loadKokoro(){
+    if(state.kokoro) return state.kokoro;
+    if(state.kokoroLoadPromise) return state.kokoroLoadPromise;
+
+    state.kokoroLoadPromise = (async ()=>{
+      setEngineStatus("Loading natural voice engine…");
+      const mod = await import(/* webpackIgnore: true */ KOKORO_CDN);
+      const { KokoroTTS } = mod;
+      const progress_callback = (info)=>{
+        if(info && typeof info.progress === "number"){
+          setEngineStatus("Downloading natural voice model… " + Math.round(info.progress) + "% (first time only, then it's cached)");
+        }
+      };
+      let tts;
+      try{
+        tts = await KokoroTTS.from_pretrained(KOKORO_MODEL_ID, { dtype:"q8", device:"wasm", progress_callback });
+      } catch(err){
+        console.error("Kokoro load failed", err);
+        throw err;
+      }
+      state.kokoro = tts;
+      setEngineStatus("", false);
+      return tts;
+    })();
+
+    try{
+      return await state.kokoroLoadPromise;
+    } catch(err){
+      state.kokoroLoadPromise = null;
+      state.engine = "browser";
+      setEngineStatus("Natural voice engine unavailable in this browser — using your system voice instead.");
+      populateBrowserVoices();
+      throw err;
+    }
+  }
+
+  async function generateSentenceAudio(text){
+    const tts = await loadKokoro();
+    const raw = await tts.generate(text, { voice: state.kokoroVoice });
+    return URL.createObjectURL(raw.toBlob());
+  }
+
+  function getOrGenerate(idx){
+    const key = cacheKey(idx);
+    if(state.cacheMap.has(key)) return Promise.resolve(state.cacheMap.get(key));
+    if(state.pendingGen.has(key)) return state.pendingGen.get(key);
+    const text = state.sentences[idx].textContent.trim();
+    const p = generateSentenceAudio(text).then(url=>{
+      cacheSet(key, url);
+      state.pendingGen.delete(key);
+      return url;
+    }).catch(err=>{
+      state.pendingGen.delete(key);
+      throw err;
+    });
+    state.pendingGen.set(key, p);
+    return p;
+  }
+
+  function prefetch(idx){
+    if(idx >= 0 && idx < state.sentences.length) getOrGenerate(idx).catch(()=>{});
+  }
+
+  function stopSpeech(){
+    ttsAudio.pause();
+    speechSynthesis.cancel();
+    state.playing = false;
+    playBtn.innerHTML = "▶";
+  }
+
+  async function speakFrom(idx){
+    if(idx >= state.sentences.length){ goNextChapterAuto(); return; }
+    state.sentenceIndex = idx;
+    state.playing = true;
+    highlight(idx);
+    updateProgress();
+
+    if(state.engine === "browser"){
+      speakFromBrowser(idx);
+      return;
+    }
+
+    playBtn.innerHTML = '<span class="spinner"></span>';
+    let url;
+    try{
+      url = await getOrGenerate(idx);
+    } catch(err){
+      // loadKokoro() already flipped state.engine to "browser" on failure
+      if(state.playing && state.sentenceIndex === idx) speakFromBrowser(idx);
+      return;
+    }
+    // user may have paused/navigated while we were generating
+    if(!state.playing || state.sentenceIndex !== idx) return;
+
+    playBtn.textContent = "⏸";
+    state.loadedIdx = idx;
+    ttsAudio.src = url;
+    ttsAudio.playbackRate = state.rate;
+    ttsAudio.play().catch(()=>{});
+    prefetch(idx + 1);
+  }
+
+  ttsAudio.addEventListener("ended", ()=>{
+    if(!state.playing || state.engine !== "kokoro") return;
+    speakFrom(state.sentenceIndex + 1);
+  });
+  ttsAudio.addEventListener("error", ()=>{
+    if(state.playing) toast("Playback hiccup — skipping ahead.");
+  });
+
+  // ---- browser speechSynthesis fallback (used only if Kokoro can't run) ----
+  function speakFromBrowser(idx){
+    speechSynthesis.cancel();
+    if(idx >= state.sentences.length){ goNextChapterAuto(); return; }
+    state.sentenceIndex = idx;
+    state.playing = true;
+    playBtn.textContent = "⏸";
+    highlight(idx);
+    updateProgress();
+    const utter = new SpeechSynthesisUtterance(state.sentences[idx].textContent);
+    utter.rate = state.rate;
+    if(state.browserVoice) utter.voice = state.browserVoice;
+    utter.onend = ()=>{ if(state.playing) speakFromBrowser(idx + 1); };
+    utter.onerror = (e)=>{
+      if(e.error === "interrupted" || e.error === "canceled") return;
+      state.playing = false; playBtn.textContent = "▶";
+    };
+    speechSynthesis.speak(utter);
+  }
+
+  function populateBrowserVoices(){
+    const voices = speechSynthesis.getVoices();
+    if(!voices.length) return;
+    state.browserVoice = voices.find(v=>/en-US|en_US/.test(v.lang)) || voices[0];
+  }
+  speechSynthesis.onvoiceschanged = populateBrowserVoices;
+  populateBrowserVoices();
+
+  function goNextChapterAuto(){
+    const book = getActiveBook();
+    if(state.activeChapter < book.chapters.length - 1){
+      state.activeChapter++;
+      renderChapter();
+      speakFrom(0);
+    } else {
+      stopSpeech();
+      toast("Finished “" + book.title + "”.");
+    }
+  }
+
+  function jumpTo(idx){
+    idx = Math.max(0, Math.min(idx, state.sentences.length-1));
+    if(state.playing){ speakFrom(idx); }
+    else { state.sentenceIndex = idx; state.loadedIdx = null; highlight(idx); updateProgress(); }
+  }
+
+  playBtn.addEventListener("click", ()=>{
+    if(!getActiveBook()) return;
+    if(state.playing){
+      stopSpeech();
+      return;
+    }
+    if(state.engine === "kokoro" && state.loadedIdx === state.sentenceIndex && ttsAudio.src && !ttsAudio.ended){
+      state.playing = true;
+      playBtn.textContent = "⏸";
+      ttsAudio.play().catch(()=>{});
+      prefetch(state.sentenceIndex + 1);
+      return;
+    }
+    speakFrom(state.sentenceIndex);
+  });
+
+  $("backBtn").addEventListener("click", ()=> jumpTo(state.sentenceIndex - 1));
+  $("fwdBtn").addEventListener("click", ()=> jumpTo(state.sentenceIndex + 1));
+
+  $("prevChapBtn").addEventListener("click", ()=>{
+    if(state.activeChapter > 0){
+      stopSpeech();
+      state.activeChapter--;
+      renderChapter();
+    }
+  });
+  $("nextChapBtn").addEventListener("click", ()=>{
+    const book = getActiveBook();
+    if(state.activeChapter < book.chapters.length-1){
+      stopSpeech();
+      state.activeChapter++;
+      renderChapter();
+    }
+  });
+
+  progressTrack.addEventListener("click", (e)=>{
+    if(!state.sentences.length) return;
+    const rect = progressTrack.getBoundingClientRect();
+    const ratio = (e.clientX - rect.left) / rect.width;
+    const idx = Math.round(ratio * (state.sentences.length-1));
+    jumpTo(idx);
+  });
+
+  rateSelect.addEventListener("change", ()=>{
+    state.rate = parseFloat(rateSelect.value);
+    ttsAudio.playbackRate = state.rate;
+    if(state.playing && state.engine === "browser") speakFromBrowser(state.sentenceIndex);
+  });
+
+  voiceSelect.addEventListener("change", ()=>{
+    state.kokoroVoice = voiceSelect.value;
+    const wasPlaying = state.playing;
+    state.loadedIdx = null;
+    if(wasPlaying) speakFrom(state.sentenceIndex);
+  });
+
+  function populateVoices(){
+    voiceSelect.innerHTML = "";
+    KOKORO_VOICES.forEach(v=>{
+      const opt = document.createElement("option");
+      opt.value = v.id;
+      opt.textContent = v.label;
+      voiceSelect.appendChild(opt);
+    });
+    voiceSelect.value = state.kokoroVoice;
+  }
+  populateVoices();
+  setEngineStatus("Natural voice — first play downloads the voice model once (~90MB), then it's cached in this browser.");
+
+  // ---------------- file intake ----------------
+  let idCounter = 1;
+
+  async function handleFiles(fileList){
+    for(const file of Array.from(fileList)){
+      try{
+        toast("Reading “" + file.name + "”…");
+        const parsed = await parseFile(file);
+        parsed.id = "b" + (idCounter++);
+        state.books.push(parsed);
+        renderShelf();
+        if(state.books.length === 1){
+          openBook(parsed.id, 0);
+        }
+      } catch(err){
+        console.error(err);
+        toast("Couldn't read " + file.name + ": " + err.message);
+      }
+    }
+  }
+
+  $("addBtn").addEventListener("click", ()=> $("fileInput").click());
+  $("addBtn2").addEventListener("click", ()=> $("fileInput").click());
+  $("fileInput").addEventListener("change", (e)=>{
+    handleFiles(e.target.files);
+    e.target.value = "";
+  });
+
+  menuBtn.addEventListener("click", ()=> shelf.classList.toggle("open"));
+
+  const appEl = $("app");
+  ["dragenter","dragover"].forEach(ev=>{
+    appEl.addEventListener(ev, e=>{ e.preventDefault(); appEl.classList.add("drop-active"); });
+  });
+  ["dragleave","drop"].forEach(ev=>{
+    appEl.addEventListener(ev, e=>{ e.preventDefault(); appEl.classList.remove("drop-active"); });
+  });
+  appEl.addEventListener("drop", e=>{
+    if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+  });
+
+  window.addEventListener("beforeunload", ()=> speechSynthesis.cancel());
+
+})();
+</script>
+</body>
+</html>
